@@ -1,27 +1,43 @@
 from __future__ import annotations
 import bisect, math
 
+_TWO_PI = 2.0 * math.pi
+
 class HorizonMask:
+    """Terrain horizon mask sampled as (azimuth_rad, elevation_rad) pairs.
+
+    Azimuths wrap into [0, 2*pi); samples that coincide after wrapping
+    (e.g. 0 and 360 degrees) are merged keeping the higher elevation, so
+    interpolation stays continuous across north instead of jumping.
+    """
 
     def __init__(self, points):
-        pts = sorted(((a % (2 * math.pi), e) for a, e in points))
-        self.az = [p[0] for p in pts]
-        self.el = [p[1] for p in pts]
+        merged = {}
+        for az, el in points:
+            key = az % _TWO_PI
+            merged[key] = max(merged[key], el) if key in merged else el
+        pts = sorted(merged.items())
+        self.az = [a for a, _ in pts]
+        self.el = [e for _, e in pts]
 
     def elevation_limit(self, az):
-        if not self.az:
+        n = len(self.az)
+        if n == 0:
             return -math.pi / 2
-        az %= 2 * math.pi
-        i = bisect.bisect_right(self.az, az)
-        i0 = (i - 1) % len(self.az)
-        i1 = i % len(self.az)
+        if n == 1:
+            return self.el[0]
+        a = az % _TWO_PI
+        i = bisect.bisect_right(self.az, a)
+        i0 = (i - 1) % n
+        i1 = i % n
         a0 = self.az[i0]
         a1 = self.az[i1]
-        if i1 == 0:
-            a1 += 2 * math.pi
-        aa = az if az >= a0 else az + 2 * math.pi
-        u = (aa - a0) / (a1 - a0) if a1 != a0 else 0
-        return self.el[i0] * (1 - u) + self.el[i1] * u
+        if a1 <= a0:
+            a1 += _TWO_PI
+        if a < a0:
+            a += _TWO_PI
+        u = (a - a0) / (a1 - a0)
+        return self.el[i0] + (self.el[i1] - self.el[i0]) * u
 
     def clear(self, az, el):
         return el >= self.elevation_limit(az)
